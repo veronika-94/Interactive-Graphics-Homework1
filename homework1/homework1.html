@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+
+<script type="text/javascript" id="vertex-shader" type="x-shader/x-vertex">
+#version 300 es
+
+in  vec4 aPosition;
+in  vec3 aNormal;
+in  vec4 aColor;
+in  vec2 aTexCoord;
+out vec2 vTexCoord;
+out vec4 vColor;
+out vec4 aaColor, vvColor;
+
+uniform mat4 uModelViewMatrix;
+uniform mat4 uProjectionMatrix;
+
+uniform bool dirFlag;
+uniform bool spotFlag;
+ 
+uniform vec4 uDirLightPosition;
+uniform vec4 uSpotLightPosition;
+uniform vec4 uDirAmbientProduct, uDirDiffuseProduct, uDirSpecularProduct;
+uniform float uShininess;
+
+out vec3 Ld, Nd, posD, lightD;
+out vec3 Ns, posS, lightS;
+
+void main() {
+
+	vec4 NN = vec4(aNormal,0);
+	vec4 dirAmbient, dirDiffuse, dirSpecular;
+	
+	
+	//Directional light
+	if(dirFlag){
+		vec3 pos = (uModelViewMatrix * aPosition).xyz;
+        vec3 light = uDirLightPosition.xyz;
+        vec3 Ld = normalize(light);
+        vec3 E = normalize(-pos);
+        vec3 N = normalize((uModelViewMatrix*NN).xyz);
+        vec3 H = normalize(Ld + E);
+        dirAmbient = uDirAmbientProduct;
+        float Kd = max(dot(Ld, N), 0.0);
+        dirDiffuse = Kd * uDirDiffuseProduct;
+        float Ks = pow(max(dot(N, H), 0.0), uShininess);
+        dirSpecular = Ks * uDirSpecularProduct;
+        if (dot(Ld,N) < 0.0) dirSpecular=vec4(0.0, 0.0, 0.0, 1.0);
+	}
+	
+	//Spotlight
+	if(spotFlag){
+		vec3 pos = (uModelViewMatrix * aPosition).xyz;
+		vec3 spotLight = uSpotLightPosition.xyz;
+		posS = pos;
+		lightS = spotLight;
+		vec3 Ns = normalize((uModelViewMatrix*NN).xyz);
+	}
+
+
+    vTexCoord = aTexCoord;
+    gl_Position = uProjectionMatrix * uModelViewMatrix * aPosition;
+
+	vvColor = dirAmbient + dirDiffuse + dirSpecular;
+	aaColor = aColor;
+	
+}
+</script>
+
+<script type="text/javascript" id="fragment-shader" type="x-shader/x-fragment">
+#version 300 es
+
+precision mediump float;
+
+in vec2 vTexCoord;
+out vec4 fColor;
+
+uniform sampler2D uTextureMap;
+uniform bool textureFlag;
+uniform bool dirFlag2;
+uniform bool spotFlag2;
+
+uniform float uCutOff;
+
+uniform vec4 uDirLightPosition2;
+uniform vec4 uSpotLightPosition2;
+
+uniform vec4 uDirAmbientProduct2, uDirDiffuseProduct2; //, uDirSpecularProduct;
+uniform vec4 uSpotAmbientProduct, uSpotDiffuseProduct, uSpotSpecularProduct;
+uniform vec4 uSpotLightDirection;
+
+uniform float uShininess2;
+uniform vec4 ag_am;
+
+in vec3 Ld, Nd, posD, lightD;
+in vec3 Ns, posS, lightS;
+in vec4 aaColor, vvColor;
+
+void main() {
+
+    float d = 1.0/256.0;
+    float x = vTexCoord.x;
+    float y = vTexCoord.y;
+	
+	vec4 spotAmbient, spotDiffuse, spotSpecular;
+	vec4 cDir, cSpot;
+	
+	
+	//Directional light
+	if(dirFlag2){
+		if(max(dot(Ld, Nd), 0.0) >= 0.5){
+			cDir = ag_am + uDirAmbientProduct2 + uDirDiffuseProduct2;
+		}
+		else {
+			cDir = ag_am + uDirAmbientProduct2;
+		}
+	}
+	
+	//Spotlight
+	if(spotFlag2){
+		vec3 L, N, E;
+		N = Ns;
+		vec3 ligh4 = uSpotLightPosition2.xyz;
+		L = normalize(lightS - posS);
+		E = normalize(-posS);
+		vec3 H = normalize(L + E);
+		vec4 spotAmbientT = uSpotAmbientProduct;
+		float Kd = max(dot(L, N), 0.0);
+		vec4 spotDiffuseT = Kd * uSpotDiffuseProduct;
+		float Ks = pow(max(dot(N, H), 0.0), uShininess2);
+		vec4 spotSpecularT = Ks * uSpotSpecularProduct;
+		if(dot(L, N) < 0.0) spotSpecularT = vec4(0.0, 0.0, 0.0, 1.0);
+		vec3 D = uSpotLightDirection.xyz;
+		float effect = dot(normalize(D), normalize(L));
+		if(effect > uCutOff){
+			spotAmbient = spotAmbientT * pow(((effect - uCutOff)/(1.0 - uCutOff)), 2.0);
+			spotDiffuse = spotDiffuseT * pow(((effect - uCutOff)/(1.0 - uCutOff)), 2.0);
+			spotSpecular = spotSpecularT * pow(((effect - uCutOff)/(1.0 - uCutOff)), 2.0);
+			
+			if(max(dot(L,N),0.0) >= 0.5){
+				cSpot = ag_am + uSpotAmbientProduct + uSpotDiffuseProduct;
+			}
+			else{
+				cSpot = ag_am + uSpotAmbientProduct;
+			}
+			
+		}
+	}
+
+	fColor = (aaColor * (cDir + vvColor)) + (aaColor * (cSpot +spotAmbient + spotDiffuse + spotSpecular));
+	
+	//Texture
+    if(textureFlag){
+		fColor = fColor + 10.0*abs(
+        texture(uTextureMap, vec2(x+d, y))
+       -texture(uTextureMap, vec2(x-d, y)))
+       +10.0*abs(texture( uTextureMap, vec2(x, y+d))
+       -texture(uTextureMap, vec2(x, y-d)));
+    }
+	
+    fColor.w = 1.0;
+
+}
+</script>
+
+<script type="text/javascript" src="../Common/InitShaders.js"></script>
+<script type="text/javascript" src="../Common/MVnew.js"></script>
+<script type="text/javascript" src="homework1.js"></script>
+<script type="text/javascript" src="honolulu4.js"></script>
+
+<body>
+
+<div id='render' style='float:left; background-color:#FFF; width:1026px; padding:0px;'>
+<canvas id="gl-canvas" width="1024" height="1024" style='border: 1px solid black;'>
+Oops ... your browser doesn't support the HTML5 canvas element
+</canvas>
+</div>
+
+<div id='commands' style='float:left; background-color:#FFF; width:400px; line-height: 36px; padding:10px;'>
+<p> </p>
+Z = <label id="varZ"></label> &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "Button1">Increase Z</button>
+<button id = "Button2">Decrease Z</button><br>
+R = <label id="varR"></label>&nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "Button3">Increase R</button>
+<button id = "Button4">Decrease R</button>
+
+<p> </p>
+Theta = <label id="varT"></label> PI &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "ButtonThe+">Increase +PI/4</button>
+<button id = "ButtonThe-">Decrease -PI/4</button><br>
+Phi = <label id="varP"></label> PI &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "ButtonPhi+">Increase +PI/4</button>
+<button id = "ButtonPhi-">Decrease -PI/4</button>
+
+<p> </p>
+Activate Texture &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "ButtonTex">Texture ON</button>
+
+<p> </p>
+Activate Direction Light &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "ButtonDir">Directional ON</button>
+
+<p> </p>
+Activate SpotLight &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "ButtonSpot">Spotlight ON</button><br>
+
+Cutoff = <label id="varCO"></label>° &nbsp;&nbsp;&nbsp;&nbsp;
+<button id = "co+">Cutoff +2°</button>
+<button id = "co-">Cutoff -2°</button><br>
+
+<p></p>
+
+
+</div>
+
+<div style="clear:both;"></div>
+
+
+</body>
+</html>
